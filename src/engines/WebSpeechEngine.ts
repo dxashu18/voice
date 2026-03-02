@@ -292,7 +292,7 @@ export class WebSpeechEngine implements SpeechEngine {
       this.isStopping = false;
       this.recognition.abort();
       this.setState("idle");
-    } catch (error) {
+    } catch {
       this.setState("idle");
     }
   }
