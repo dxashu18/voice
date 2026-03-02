@@ -56,6 +56,12 @@ export function ChatInterface() {
     [ttsEnabled, isListening]
   );
 
+  const speakResponseRef = useRef(speakResponse);
+
+  useEffect(() => {
+    speakResponseRef.current = speakResponse;
+  }, [speakResponse]);
+
   // Initialize speech engine
   useEffect(() => {
     if (!isSupported) return;
@@ -70,7 +76,10 @@ export function ChatInterface() {
       },
       onFinal: (text) => {
         const normalized = text.trim().replace(/\s+/g, " ");
-        setInputValue(normalized);
+        setInputValue((prev) => {
+          const base = prev.replace(/\s*\[.*?\]\s*$/, "").trim();
+          return base ? `${base} ${normalized}` : normalized;
+        });
         autoSendRef.current = true;
       },
       onError: () => {
@@ -146,7 +155,7 @@ export function ChatInterface() {
           setMessages([greeting]);
           setStreamingContent("");
           setIsGenerating(false);
-          speakResponse(accumulated, greetId);
+          speakResponseRef.current(accumulated, greetId);
         },
         (error) => {
           console.error("Greeting error:", error);
@@ -160,7 +169,7 @@ export function ChatInterface() {
           setMessages([fallback]);
           setStreamingContent("");
           setIsGenerating(false);
-          speakResponse(fallback.content, fbId);
+          speakResponseRef.current(fallback.content, fbId);
         },
         controller.signal
       );
@@ -171,7 +180,7 @@ export function ChatInterface() {
     return () => {
       abortControllerRef.current?.abort();
     };
-  }, [speakResponse]);
+  }, []);
 
   const toggleVoice = useCallback(() => {
     if (!engineRef.current || !isSupported) return;
@@ -316,7 +325,7 @@ export function ChatInterface() {
           setMessages([greeting]);
           setStreamingContent("");
           setIsGenerating(false);
-          speakResponse(accumulated, gId);
+          speakResponseRef.current(accumulated, gId);
         },
         () => {
           const fId = crypto.randomUUID();
@@ -329,13 +338,13 @@ export function ChatInterface() {
           setMessages([fallback]);
           setStreamingContent("");
           setIsGenerating(false);
-          speakResponse(fallback.content, fId);
+          speakResponseRef.current(fallback.content, fId);
         },
         controller.signal
       );
     };
     greet();
-  }, [speakResponse]);
+  }, []);
 
   return (
     <div className="flex flex-col h-full">

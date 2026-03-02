@@ -2,6 +2,7 @@ type TTSCallback = () => void;
 
 class TTSService {
   private synth: SpeechSynthesis | null = null;
+  private currentUtterance: SpeechSynthesisUtterance | null = null;
   private enabled: boolean = true;
   private onSpeakingChangeCallbacks: Array<(speaking: boolean) => void> = [];
 
@@ -55,6 +56,8 @@ class TTSService {
     this.stop();
 
     const utterance = new SpeechSynthesisUtterance(text);
+    this.currentUtterance = utterance;
+
     utterance.rate = 1.05;
     utterance.pitch = 1.0;
     utterance.volume = 1.0;
@@ -79,19 +82,26 @@ class TTSService {
     }
 
     utterance.onstart = () => {
+      if (this.currentUtterance !== utterance) return;
       this.notifySpeakingChange(true);
     };
 
     utterance.onend = () => {
+      if (this.currentUtterance !== utterance) return;
+      this.currentUtterance = null;
       this.notifySpeakingChange(false);
       onEnd?.();
     };
 
     utterance.onerror = (event) => {
+      if (this.currentUtterance !== utterance) return;
+
       // "interrupted" and "canceled" are expected when we call stop()
       if (event.error !== "interrupted" && event.error !== "canceled") {
         console.error("TTS error:", event.error);
       }
+
+      this.currentUtterance = null;
       this.notifySpeakingChange(false);
       onEnd?.();
     };
@@ -100,10 +110,11 @@ class TTSService {
   }
 
   stop(): void {
-    if (this.synth?.speaking) {
-      this.synth.cancel();
-      this.notifySpeakingChange(false);
-    }
+    if (!this.synth) return;
+
+    this.synth.cancel();
+    this.currentUtterance = null;
+    this.notifySpeakingChange(false);
   }
 }
 
