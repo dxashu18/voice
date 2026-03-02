@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Send, Mic, MicOff, Loader2, RotateCcw } from "lucide-react";
+import { Send, Mic, MicOff, Loader2, RotateCcw, Volume2, VolumeX } from "lucide-react";
 import { ChatMessageBubble } from "./ChatMessage";
 import {
   ChatMessage,
@@ -9,11 +9,13 @@ import { WebSpeechEngine } from "../engines/WebSpeechEngine";
 import { SpeechEngineState } from "../engines/SpeechEngine";
 import { isWebSpeechSupported } from "../utils/capabilities";
 import { normalizeInterim } from "../utils/normalize";
+import { ttsService } from "../services/ttsService";
 
 interface DisplayMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
+  isSpeaking?: boolean;
 }
 
 export function ChatInterface() {
@@ -23,12 +25,42 @@ export function ChatInterface() {
   const [streamingContent, setStreamingContent] = useState("");
   const [engineState, setEngineState] = useState<SpeechEngineState>("idle");
   const [isListening, setIsListening] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(ttsService.isSupported());
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(null);
+  const autoSendRef = useRef(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const sendMessageRef = useRef<() => void>(() => {});
   const engineRef = useRef<WebSpeechEngine | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const isSupported = isWebSpeechSupported();
+
+  // Speak assistant response helper
+  const speakResponse = useCallback(
+    (text: string, messageId: string) => {
+      if (!ttsEnabled) return;
+      // Stop any ongoing STT to avoid feedback
+      if (engineRef.current && isListening) {
+        engineRef.current.stop();
+        setIsListening(false);
+      }
+      setSpeakingMessageId(messageId);
+      setIsSpeaking(true);
+      ttsService.speak(text, () => {
+        setIsSpeaking(false);
+        setSpeakingMessageId(null);
+      });
+    },
+    [ttsEnabled, isListening]
+  );
+
+  const speakResponseRef = useRef(speakResponse);
+
+  useEffect(() => {
+    speakResponseRef.current = speakResponse;
+  }, [speakResponse]);
 
   // Initialize speech engine
   useEffect(() => {
@@ -45,9 +77,10 @@ export function ChatInterface() {
       onFinal: (text) => {
         const normalized = text.trim().replace(/\s+/g, " ");
         setInputValue((prev) => {
-          const base = prev.replace(/\s*\[.*?\]\s*$/, "");
+          const base = prev.replace(/\s*\[.*?\]\s*$/, "").trim();
           return base ? `${base} ${normalized}` : normalized;
         });
+        autoSendRef.current = true;
       },
       onError: () => {
         setIsListening(false);
@@ -68,6 +101,27 @@ export function ChatInterface() {
       engineRef.current = null;
     };
   }, [isSupported]);
+
+  // Auto-send after voice input finishes
+  useEffect(() => {
+    if (autoSendRef.current && inputValue.trim() && !isGenerating) {
+      autoSendRef.current = false;
+      // Small delay to let the UI update with the transcribed text
+      const timer = setTimeout(() => {
+        sendMessageRef.current();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [inputValue, isGenerating]);
+
+  // TTS speaking change listener
+  useEffect(() => {
+    const unsub = ttsService.onSpeakingChange((speaking) => {
+      setIsSpeaking(speaking);
+      if (!speaking) setSpeakingMessageId(null);
+    });
+    return unsub;
+  }, []);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -92,19 +146,22 @@ export function ChatInterface() {
           setStreamingContent(accumulated);
         },
         () => {
+          const greetId = crypto.randomUUID();
           const greeting: DisplayMessage = {
-            id: crypto.randomUUID(),
+            id: greetId,
             role: "assistant",
             content: accumulated,
           };
           setMessages([greeting]);
           setStreamingContent("");
           setIsGenerating(false);
+          speakResponseRef.current(accumulated, greetId);
         },
         (error) => {
           console.error("Greeting error:", error);
+          const fbId = crypto.randomUUID();
           const fallback: DisplayMessage = {
-            id: crypto.randomUUID(),
+            id: fbId,
             role: "assistant",
             content:
               "Hello! I'm here to help you register. Let's start with your full name. What is it?",
@@ -112,6 +169,7 @@ export function ChatInterface() {
           setMessages([fallback]);
           setStreamingContent("");
           setIsGenerating(false);
+          speakResponseRef.current(fallback.content, fbId);
         },
         controller.signal
       );
@@ -126,6 +184,11 @@ export function ChatInterface() {
 
   const toggleVoice = useCallback(() => {
     if (!engineRef.current || !isSupported) return;
+
+    // Stop TTS when user wants to speak
+    if (!isListening) {
+      ttsService.stop();
+    }
 
     if (isListening) {
       engineRef.current.stop();
@@ -178,14 +241,16 @@ export function ChatInterface() {
         setStreamingContent(accumulated);
       },
       () => {
+        const msgId = crypto.randomUUID();
         const assistantMessage: DisplayMessage = {
-          id: crypto.randomUUID(),
+          id: msgId,
           role: "assistant",
           content: accumulated,
         };
         setMessages((prev) => [...prev, assistantMessage]);
         setStreamingContent("");
         setIsGenerating(false);
+        speakResponse(accumulated, msgId);
       },
       (error) => {
         console.error("Chat error:", error);
@@ -201,7 +266,10 @@ export function ChatInterface() {
       },
       controller.signal
     );
-  }, [inputValue, messages, isGenerating, isListening]);
+  }, [inputValue, messages, isGenerating, isListening, speakResponse]);
+
+  // Keep sendMessageRef updated for auto-send
+  sendMessageRef.current = sendMessage;
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -213,12 +281,26 @@ export function ChatInterface() {
     [sendMessage]
   );
 
+  const toggleTts = useCallback(() => {
+    const newVal = !ttsEnabled;
+    setTtsEnabled(newVal);
+    ttsService.setEnabled(newVal);
+    if (!newVal) {
+      ttsService.stop();
+      setIsSpeaking(false);
+      setSpeakingMessageId(null);
+    }
+  }, [ttsEnabled]);
+
   const resetChat = useCallback(() => {
     abortControllerRef.current?.abort();
+    ttsService.stop();
     setMessages([]);
     setStreamingContent("");
     setIsGenerating(false);
     setInputValue("");
+    setIsSpeaking(false);
+    setSpeakingMessageId(null);
 
     // Re-trigger greeting
     const greet = async () => {
@@ -234,18 +316,21 @@ export function ChatInterface() {
           setStreamingContent(accumulated);
         },
         () => {
+          const gId = crypto.randomUUID();
           const greeting: DisplayMessage = {
-            id: crypto.randomUUID(),
+            id: gId,
             role: "assistant",
             content: accumulated,
           };
           setMessages([greeting]);
           setStreamingContent("");
           setIsGenerating(false);
+          speakResponseRef.current(accumulated, gId);
         },
         () => {
+          const fId = crypto.randomUUID();
           const fallback: DisplayMessage = {
-            id: crypto.randomUUID(),
+            id: fId,
             role: "assistant",
             content:
               "Hello! I'm here to help you register. Let's start with your full name.",
@@ -253,6 +338,7 @@ export function ChatInterface() {
           setMessages([fallback]);
           setStreamingContent("");
           setIsGenerating(false);
+          speakResponseRef.current(fallback.content, fId);
         },
         controller.signal
       );
@@ -273,17 +359,40 @@ export function ChatInterface() {
               Registration Assistant
             </h2>
             <p className="text-xs text-gray-500">
-              {isGenerating ? "Typing..." : "Online"}
+              {isSpeaking
+                ? "Speaking..."
+                : isGenerating
+                ? "Typing..."
+                : "Online"}
             </p>
           </div>
         </div>
-        <button
-          onClick={resetChat}
-          className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
-          title="Start new registration"
-        >
-          <RotateCcw className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-1">
+          {ttsService.isSupported() && (
+            <button
+              onClick={toggleTts}
+              className={`p-2 rounded-lg transition-colors ${
+                ttsEnabled
+                  ? "text-purple-500 hover:bg-purple-50"
+                  : "text-gray-400 hover:bg-gray-100"
+              }`}
+              title={ttsEnabled ? "Mute voice responses" : "Enable voice responses"}
+            >
+              {ttsEnabled ? (
+                <Volume2 className="w-4 h-4" />
+              ) : (
+                <VolumeX className="w-4 h-4" />
+              )}
+            </button>
+          )}
+          <button
+            onClick={resetChat}
+            className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+            title="Start new registration"
+          >
+            <RotateCcw className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {/* Messages */}
@@ -293,6 +402,7 @@ export function ChatInterface() {
             key={msg.id}
             role={msg.role}
             content={msg.content}
+            isSpeaking={msg.role === "assistant" && speakingMessageId === msg.id}
           />
         ))}
 

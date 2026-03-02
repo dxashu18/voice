@@ -1,15 +1,17 @@
-import { Bot, User } from "lucide-react";
+import { Bot, User, Volume2 } from "lucide-react";
 
 interface ChatMessageProps {
   role: "user" | "assistant";
   content: string;
   isStreaming?: boolean;
+  isSpeaking?: boolean;
 }
 
 export function ChatMessageBubble({
   role,
   content,
   isStreaming = false,
+  isSpeaking = false,
 }: ChatMessageProps) {
   const isUser = role === "user";
 
@@ -32,7 +34,7 @@ export function ChatMessageBubble({
           isUser
             ? "bg-blue-500 text-white rounded-tr-sm"
             : "bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm"
-        }`}
+        } ${isSpeaking ? "ring-2 ring-purple-300 ring-opacity-75" : ""}`}
       >
         <p className="text-sm leading-relaxed whitespace-pre-wrap">
           {content}
@@ -40,6 +42,12 @@ export function ChatMessageBubble({
             <span className="inline-block w-1.5 h-4 ml-0.5 bg-current animate-pulse rounded-sm" />
           )}
         </p>
+        {isSpeaking && (
+          <div className="flex items-center gap-1 mt-1.5 text-purple-500">
+            <Volume2 className="w-3 h-3" />
+            <span className="text-xs">Speaking...</span>
+          </div>
+        )}
       </div>
     </div>
   );
