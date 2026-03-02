@@ -1,7 +1,7 @@
 import http from "node:http";
 import { Readable } from "node:stream";
 
-const GROK_API_URL = "https://api.x.ai/v1/chat/completions";
+const GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions";
 
 const REGISTRATION_SYSTEM_PROMPT = `You are a friendly, concise registration assistant. Your ONLY purpose is to help users register by collecting the following information one field at a time:
 
@@ -54,11 +54,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && req.url === "/api/chat") {
-      const apiKey = process.env.GROK_API_KEY;
+      const apiKey = process.env.GROQ_API_KEY;
       if (!apiKey) {
         json(res, 500, {
           error:
-            "Missing GROK_API_KEY. Set GROK_API_KEY in your server environment.",
+            "Missing GROQ_API_KEY. Set GROQ_API_KEY in your server environment.",
         });
         return;
       }
@@ -84,14 +84,14 @@ const server = http.createServer(async (req, res) => {
         controller.abort();
       });
 
-      const upstream = await fetch(GROK_API_URL, {
+      const upstream = await fetch(GROQ_API_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${apiKey}`,
         },
         body: JSON.stringify({
-          model: "grok-3-mini-fast",
+          model: "llama-3.3-70b-versatile",
           messages,
           stream: true,
           max_tokens: 200,
