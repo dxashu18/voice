@@ -8,7 +8,7 @@ import {
 import { WebSpeechEngine } from "../engines/WebSpeechEngine";
 import { SpeechEngineState } from "../engines/SpeechEngine";
 import { isWebSpeechSupported } from "../utils/capabilities";
-import { normalizeInterim, normalizeFinal } from "../utils/normalize";
+import { normalizeInterim } from "../utils/normalize";
 
 interface DisplayMessage {
   id: string;
@@ -43,7 +43,7 @@ export function ChatInterface() {
         });
       },
       onFinal: (text) => {
-        const normalized = normalizeFinal(text);
+        const normalized = text.trim().replace(/\s+/g, " ");
         setInputValue((prev) => {
           const base = prev.replace(/\s*\[.*?\]\s*$/, "");
           return base ? `${base} ${normalized}` : normalized;
